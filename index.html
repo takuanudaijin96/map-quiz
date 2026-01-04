@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>地図クイズ教材</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+
+<style>
+body {
+  margin: 0;
+  font-family: "Yu Gothic", sans-serif;
+  background: #f7f7f7;
+}
+#map {
+  height: 45vh;
+  border-bottom: 1px solid #ccc;
+}
+.screen {
+  padding: 12px;
+}
+.hidden { display: none; }
+
+h3 {
+  margin: 4px 0 10px;
+  padding-bottom: 6px;
+  border-bottom: 2px solid #4a90e2;
+}
+
+button {
+  width: 100%;
+  margin: 6px 0;
+  padding: 10px;
+  font-size: 16px;
+  border-radius: 8px;
+  border: none;
+  background: #4a90e2;
+  color: white;
+}
+button.secondary { background: #aaa; }
+button.choice { background: #2ecc71; }
+
+select, input {
+  width: 100%;
+  margin: 6px 0;
+  padding: 8px;
+  font-size: 16px;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+}
+
+.card {
+  background: white;
+  border-radius: 10px;
+  padding: 10px;
+  margin: 8px 0;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.08);
+}
+</style>
+</head>
+
+<body>
+
+<div id="map"></div>
+
+<!-- メニュー -->
+<div class="screen" id="menu">
+  <h3>地図クイズ</h3>
+  <button onclick="switchMode('play')">▶ 解答モード</button>
+  <button class="secondary" onclick="switchMode('create')">⚙ 作問モード</button>
+</div>
+
+<!-- 章選択 -->
+<div class="screen hidden" id="chapterScreen">
+  <h3>章を選択</h3>
+  <select id="chapterSelect"></select>
+  <button onclick="toDifficulty()">次へ</button>
+  <button class="secondary" onclick="show('menu')">戻る</button>
+</div>
+
+<!-- 難易度 -->
+<div class="screen hidden" id="difficultyScreen">
+  <h3>難易度</h3>
+  <select id="difficultySelectPlay">
+    <option value="all">全て</option>
+    <option value="1">★</option>
+    <option value="2">★★以上</option>
+    <option value="3">★★★</option>
+  </select>
+  <button onclick="startQuiz()">開始</button>
+  <button class="secondary" onclick="show('chapterScreen')">戻る</button>
+</div>
+
+<!-- クイズ -->
+<div class="screen hidden" id="quizScreen">
+  <div class="card">
+    <strong id="chapterLabel"></strong>
+    <div id="progressText"></div>
+    <div id="scoreText"></div>
+  </div>
+  <div class="card" id="questionText">この場所は？</div>
+  <div id="choices"></div>
+  <button onclick="showHint()">ヒント</button>
+  <div id="hintArea"></div>
+</div>
+
+<!-- 作問 -->
+<div class="screen hidden" id="createMenu">
+  <h3>作問モード</h3>
+  <button onclick="show('createNew')">新規作問</button>
+  <button onclick="show('createList')">問題一覧</button>
+  <button onclick="show('createChapter')">章の地図設定</button>
+  <button class="secondary" onclick="show('menu')">戻る</button>
+</div>
+
+<div class="screen hidden" id="createNew">
+  <h3>新規作問</h3>
+  <input id="chapterInput" placeholder="章名">
+  <select id="difficultyCreate">
+    <option value="1">★</option>
+    <option value="2">★★</option>
+    <option value="3">★★★</option>
+  </select>
+  <input id="answerInput" placeholder="正解">
+  <input id="c1" placeholder="選択肢1">
+  <input id="c2" placeholder="選択肢2">
+  <input id="c3" placeholder="選択肢3">
+  <input id="h1" placeholder="ヒント1">
+  <input id="h2" placeholder="ヒント2">
+  <button onclick="addQuestion()">保存</button>
+  <button class="secondary" onclick="show('createMenu')">戻る</button>
+</div>
+
+<div class="screen hidden" id="createList">
+  <h3>問題一覧</h3>
+  <div id="questionList"></div>
+  <button class="secondary" onclick="show('createMenu')">戻る</button>
+</div>
+
+<div class="screen hidden" id="createChapter">
+  <h3>章の地図設定</h3>
+  <input id="chapterViewInput" placeholder="章名">
+  <button onclick="saveChapterView()">保存</button>
+  <button class="secondary" onclick="show('createMenu')">戻る</button>
+</div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script>
+let map = L.map("map").setView([35,135],4);
+
+// 作問用日本語地図タイル（初期は非表示）
+let labelTile = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© OpenStreetMap'
+}).addTo(map);
+
+// 解答用ラベルなしタイル
+let noLabelTile = L.tileLayer("https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png");
+noLabelTile.addTo(map);
+
+let questions = JSON.parse(localStorage.getItem("questions")||"[]");
+let chapters = JSON.parse(localStorage.getItem("chapters")||"{}");
+let progress = JSON.parse(localStorage.getItem("progress")||"{}");
+
+let currentChapter="", quiz=[], index=0, correct=0, hintIdx=0, marker, tempLatLng;
+
+function saveAll(){
+  localStorage.setItem("questions",JSON.stringify(questions));
+  localStorage.setItem("chapters",JSON.stringify(chapters));
+  localStorage.setItem("progress",JSON.stringify(progress));
+}
+
+function show(id){
+  document.querySelectorAll(".screen").forEach(s=>s.classList.add("hidden"));
+  document.getElementById(id).classList.remove("hidden");
+  map.invalidateSize();
+}
+
+// 作問モードはパスワードなし＆日本語地図
+function switchMode(mode){
+  if(mode==="create"){
+    map.removeLayer(noLabelTile);
+    if(labelTile) labelTile.remove();
+    labelTile.addTo(map);
+    updateList(); 
+    show("createMenu");
+  } else {
+    map.removeLayer(labelTile); 
+    noLabelTile.addTo(map);
+    updateChapterSelect(); 
+    show("chapterScreen");
+  }
+}
+
+function updateChapterSelect(){
+  chapterSelect.innerHTML="";
+  [...new Set(questions.map(q=>q.chapter))].forEach(c=>{
+    let o=document.createElement("option");
+    o.value=o.textContent=c;
+    chapterSelect.appendChild(o);
+  });
+}
+
+function toDifficulty(){
+  currentChapter=chapterSelect.value;
+  if(chapters[currentChapter]){
+    let v=chapters[currentChapter];
+    map.setView(v.center,v.zoom);
+  }
+  show("difficultyScreen");
+}
+
+function startQuiz(){
+  let d=difficultySelectPlay.value;
+  quiz=questions.filter(q=>
+    q.chapter===currentChapter &&
+    (d==="all"||d==="1"&&q.difficulty==1||d==="2"&&q.difficulty>=2||d==="3"&&q.difficulty==3)
+  );
+  index=0; correct=0;
+  progress[currentChapter]??={answered:0,correct:0};
+  showQuestion();
+}
+
+function showQuestion(){
+  if(index>=quiz.length){ saveAll(); alert("終了"); show("menu"); return;}
+  let q=quiz[index];
+  if(marker) marker.remove();
+  marker=L.marker([q.lat,q.lng]).addTo(map);
+  hintIdx=0; hintArea.innerHTML="";
+  chapterLabel.textContent="章："+currentChapter;
+  progressText.textContent=`進捗 ${index+1}/${quiz.length}`;
+  scoreText.textContent=`正答率 ${progress[currentChapter].correct}/${progress[currentChapter].answered||0}`;
+  choices.innerHTML="";
+  q.choices.forEach(c=>{
+    let b=document.createElement("button");
+    b.className="choice";
+    b.textContent=c;
+    b.onclick=()=>check(c===q.answer);
+    choices.appendChild(b);
+  });
+  show("quizScreen");
+}
+
+function check(ok){
+  progress[currentChapter].answered++;
+  if(ok){ progress[currentChapter].correct++; index++; showQuestion(); }
+  else alert("不正解");
+}
+
+function showHint(){
+  let h=quiz[index].hints;
+  if(hintIdx<h.length){
+    let p=document.createElement("p");
+    p.textContent=h[hintIdx++];
+    hintArea.appendChild(p);
+  }
+}
+
+map.on("click",e=>{
+  if(!document.getElementById("createNew").classList.contains("hidden")){
+    tempLatLng=e.latlng;
+    if(marker) marker.remove();
+    marker=L.marker(e.latlng).addTo(map);
+  }
+});
+
+function addQuestion(){
+  if(!tempLatLng) return alert("地図をクリック");
+  questions.push({
+    chapter:chapterInput.value,
+    difficulty:+difficultyCreate.value,
+    answer:answerInput.value,
+    choices:[c1.value,c2.value,c3.value],
+    hints:[h1.value,h2.value],
+    lat:tempLatLng.lat,
+    lng:tempLatLng.lng
+  });
+  saveAll(); alert("保存しました");
+}
+
+function updateList(){
+  questionList.innerHTML="";
+  questions.forEach((q,i)=>{
+    let d=document.createElement("div");
+    d.className="card";
+    d.textContent=`${q.chapter} ★${q.difficulty} ${q.answer}`;
+    let b=document.createElement("button");
+    b.textContent="削除";
+    b.onclick=()=>{ if(confirm("削除?")){questions.splice(i,1); saveAll(); updateList();}};
+    d.appendChild(b); questionList.appendChild(d);
+  });
+}
+
+function saveChapterView(){
+  chapters[chapterViewInput.value]={center:map.getCenter(),zoom:map.getZoom()};
+  saveAll(); alert("保存しました");
+}
+
+window.onload=()=>switchMode("play");
+</script>
+</body>
+</html>
