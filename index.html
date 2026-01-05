@@ -8,70 +8,29 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
 
 <style>
-body {
-  margin: 0;
-  font-family: "Yu Gothic", sans-serif;
-  background: #f7f7f7;
-}
-#map {
-  height: 45vh;
-  border-bottom: 1px solid #ccc;
-}
-.screen {
-  padding: 12px;
-}
-.hidden { display: none; }
-
-h3 {
-  margin: 4px 0 10px;
-  padding-bottom: 6px;
-  border-bottom: 2px solid #4a90e2;
-}
-
-button {
-  width: 100%;
-  margin: 6px 0;
-  padding: 10px;
-  font-size: 16px;
-  border-radius: 8px;
-  border: none;
-  background: #4a90e2;
-  color: white;
-}
-button.secondary { background: #aaa; }
-button.choice { background: #2ecc71; }
-
-select, input {
-  width: 100%;
-  margin: 6px 0;
-  padding: 8px;
-  font-size: 16px;
-  border-radius: 6px;
-  border: 1px solid #ccc;
-}
-
-.card {
-  background: white;
-  border-radius: 10px;
-  padding: 10px;
-  margin: 8px 0;
-  box-shadow: 0 2px 5px rgba(0,0,0,0.08);
-}
+body { margin:0; font-family:"Yu Gothic",sans-serif; background:#f7f7f7; }
+#map { height:45vh; border-bottom:1px solid #ccc; }
+.screen { padding:12px; }
+.hidden { display:none; }
+h3 { margin:4px 0 10px; padding-bottom:6px; border-bottom:2px solid #4a90e2; }
+button { width:100%; margin:6px 0; padding:10px; font-size:16px; border-radius:8px; border:none; background:#4a90e2; color:white; }
+button.secondary { background:#aaa; }
+button.choice { background:#2ecc71; }
+select,input { width:100%; margin:6px 0; padding:8px; font-size:16px; border-radius:6px; border:1px solid #ccc; }
+.card { background:white; border-radius:10px; padding:10px; margin:8px 0; box-shadow:0 2px 5px rgba(0,0,0,0.08); }
 </style>
 </head>
-
 <body>
-
 <div id="map"></div>
 
 <!-- メニュー -->
 <div class="screen" id="menu">
   <h3>地図クイズ</h3>
   <button onclick="switchMode('play')">▶ 解答モード</button>
-  <button class="secondary" onclick="switchMode('create')">⚙ 作問モード</button>
+  <button class="secondary" onclick="switchMode('create')">⚙ 作問モード（教師）</button>
 </div>
 
-<!-- 章選択 -->
+<!-- 解答モード 章選択 -->
 <div class="screen hidden" id="chapterScreen">
   <h3>章を選択</h3>
   <select id="chapterSelect"></select>
@@ -79,7 +38,7 @@ select, input {
   <button class="secondary" onclick="show('menu')">戻る</button>
 </div>
 
-<!-- 難易度 -->
+<!-- 難易度選択 -->
 <div class="screen hidden" id="difficultyScreen">
   <h3>難易度</h3>
   <select id="difficultySelectPlay">
@@ -92,7 +51,7 @@ select, input {
   <button class="secondary" onclick="show('chapterScreen')">戻る</button>
 </div>
 
-<!-- クイズ -->
+<!-- クイズ画面 -->
 <div class="screen hidden" id="quizScreen">
   <div class="card">
     <strong id="chapterLabel"></strong>
@@ -105,15 +64,28 @@ select, input {
   <div id="hintArea"></div>
 </div>
 
-<!-- 作問 -->
+<!-- 結果画面 -->
+<div class="screen hidden" id="resultScreen">
+  <h3>結果</h3>
+  <div id="resultScore"></div>
+  <h4>正解した問題</h4>
+  <ul id="correctList"></ul>
+  <h4>間違えた問題</h4>
+  <ul id="wrongList"></ul>
+  <button onclick="show('menu')">メニューに戻る</button>
+</div>
+
+<!-- 作問モード -->
 <div class="screen hidden" id="createMenu">
   <h3>作問モード</h3>
   <button onclick="show('createNew')">新規作問</button>
-  <button onclick="show('createList')">問題一覧</button>
+  <button onclick="showCreateList()">問題一覧</button>
   <button onclick="show('createChapter')">章の地図設定</button>
+  <button onclick="downloadJSON()">JSON出力（共有用）</button>
   <button class="secondary" onclick="show('menu')">戻る</button>
 </div>
 
+<!-- 新規作問 -->
 <div class="screen hidden" id="createNew">
   <h3>新規作問</h3>
   <input id="chapterInput" placeholder="章名">
@@ -132,12 +104,17 @@ select, input {
   <button class="secondary" onclick="show('createMenu')">戻る</button>
 </div>
 
+<!-- 問題一覧 -->
 <div class="screen hidden" id="createList">
   <h3>問題一覧</h3>
+  <select id="listChapterSelect" onchange="updateList()">
+    <option value="">章を選択</option>
+  </select>
   <div id="questionList"></div>
   <button class="secondary" onclick="show('createMenu')">戻る</button>
 </div>
 
+<!-- 章の地図設定 -->
 <div class="screen hidden" id="createChapter">
   <h3>章の地図設定</h3>
   <input id="chapterViewInput" placeholder="章名">
@@ -147,28 +124,34 @@ select, input {
 
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 <script>
+// 地図初期化
 let map = L.map("map").setView([35,135],4);
 
-// 作問用日本語地図タイル（初期は非表示）
-let labelTile = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  attribution: '© OpenStreetMap'
-}).addTo(map);
+// 作問モード：川だけ表示タイル
+let riverTile = L.tileLayer(
+  "https://{s}.basemaps.cartocdn.com/light_only_water/{z}/{x}/{y}{r}.png",
+  { 
+    attribution: '&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contributors &copy; CARTO',
+    subdomains: 'abcd',
+    maxZoom: 20
+  }
+);
 
-// 解答用ラベルなしタイル
-let noLabelTile = L.tileLayer("https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png");
+// 解答モード：ラベルなし
+let noLabelTile = L.tileLayer(
+  "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png"
+);
 noLabelTile.addTo(map);
 
-let questions = JSON.parse(localStorage.getItem("questions")||"[]");
+// データ管理
+let questions = [];
 let chapters = JSON.parse(localStorage.getItem("chapters")||"{}");
 let progress = JSON.parse(localStorage.getItem("progress")||"{}");
 
-let currentChapter="", quiz=[], index=0, correct=0, hintIdx=0, marker, tempLatLng;
+let currentChapter="", quiz=[], index=0, hintIdx=0, marker, tempLatLng;
+let correctQuestions=[], wrongQuestions=[];
 
-function saveAll(){
-  localStorage.setItem("questions",JSON.stringify(questions));
-  localStorage.setItem("chapters",JSON.stringify(chapters));
-  localStorage.setItem("progress",JSON.stringify(progress));
-}
+function saveProgress(){ localStorage.setItem("progress",JSON.stringify(progress)); }
 
 function show(id){
   document.querySelectorAll(".screen").forEach(s=>s.classList.add("hidden"));
@@ -176,86 +159,31 @@ function show(id){
   map.invalidateSize();
 }
 
-// 作問モードはパスワードなし＆日本語地図
+// モード切替
 function switchMode(mode){
   if(mode==="create"){
-    map.removeLayer(noLabelTile);
-    if(labelTile) labelTile.remove();
-    labelTile.addTo(map);
-    updateList(); 
+    map.removeLayer(noLabelTile); riverTile.addTo(map); 
+    updateListChapterSelect(); 
     show("createMenu");
   } else {
-    map.removeLayer(labelTile); 
-    noLabelTile.addTo(map);
-    updateChapterSelect(); 
+    map.removeLayer(riverTile); noLabelTile.addTo(map);
+    updateChapterSelect();
     show("chapterScreen");
   }
 }
 
-function updateChapterSelect(){
-  chapterSelect.innerHTML="";
-  [...new Set(questions.map(q=>q.chapter))].forEach(c=>{
-    let o=document.createElement("option");
-    o.value=o.textContent=c;
-    chapterSelect.appendChild(o);
-  });
+// JSON出力
+function downloadJSON(){
+  if(questions.length === 0){ alert("まだ問題がありません！"); return; }
+  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(questions,null,2));
+  const dlAnchor = document.createElement('a');
+  dlAnchor.setAttribute("href", dataStr);
+  dlAnchor.setAttribute("download", "questions.json");
+  dlAnchor.click();
+  alert("questions.json をダウンロードしました。友達と共有できます。");
 }
 
-function toDifficulty(){
-  currentChapter=chapterSelect.value;
-  if(chapters[currentChapter]){
-    let v=chapters[currentChapter];
-    map.setView(v.center,v.zoom);
-  }
-  show("difficultyScreen");
-}
-
-function startQuiz(){
-  let d=difficultySelectPlay.value;
-  quiz=questions.filter(q=>
-    q.chapter===currentChapter &&
-    (d==="all"||d==="1"&&q.difficulty==1||d==="2"&&q.difficulty>=2||d==="3"&&q.difficulty==3)
-  );
-  index=0; correct=0;
-  progress[currentChapter]??={answered:0,correct:0};
-  showQuestion();
-}
-
-function showQuestion(){
-  if(index>=quiz.length){ saveAll(); alert("終了"); show("menu"); return;}
-  let q=quiz[index];
-  if(marker) marker.remove();
-  marker=L.marker([q.lat,q.lng]).addTo(map);
-  hintIdx=0; hintArea.innerHTML="";
-  chapterLabel.textContent="章："+currentChapter;
-  progressText.textContent=`進捗 ${index+1}/${quiz.length}`;
-  scoreText.textContent=`正答率 ${progress[currentChapter].correct}/${progress[currentChapter].answered||0}`;
-  choices.innerHTML="";
-  q.choices.forEach(c=>{
-    let b=document.createElement("button");
-    b.className="choice";
-    b.textContent=c;
-    b.onclick=()=>check(c===q.answer);
-    choices.appendChild(b);
-  });
-  show("quizScreen");
-}
-
-function check(ok){
-  progress[currentChapter].answered++;
-  if(ok){ progress[currentChapter].correct++; index++; showQuestion(); }
-  else alert("不正解");
-}
-
-function showHint(){
-  let h=quiz[index].hints;
-  if(hintIdx<h.length){
-    let p=document.createElement("p");
-    p.textContent=h[hintIdx++];
-    hintArea.appendChild(p);
-  }
-}
-
+// 作問クリック
 map.on("click",e=>{
   if(!document.getElementById("createNew").classList.contains("hidden")){
     tempLatLng=e.latlng;
@@ -264,39 +192,42 @@ map.on("click",e=>{
   }
 });
 
+// 作問保存
 function addQuestion(){
   if(!tempLatLng) return alert("地図をクリック");
   questions.push({
-    chapter:chapterInput.value,
-    difficulty:+difficultyCreate.value,
-    answer:answerInput.value,
-    choices:[c1.value,c2.value,c3.value],
-    hints:[h1.value,h2.value],
-    lat:tempLatLng.lat,
-    lng:tempLatLng.lng
+    chapter: chapterInput.value,
+    difficulty: +difficultyCreate.value,
+    answer: answerInput.value,
+    choices: [c1.value,c2.value,c3.value],
+    hints: [h1.value,h2.value],
+    lat: tempLatLng.lat,
+    lng: tempLatLng.lng
   });
-  saveAll(); alert("保存しました");
+  alert("保存しました");
+  chapterInput.value=""; difficultyCreate.value="1"; answerInput.value="";
+  c1.value=""; c2.value=""; c3.value=""; h1.value=""; h2.value="";
+  tempLatLng=null; if(marker){ marker.remove(); marker=null; }
 }
 
-function updateList(){
-  questionList.innerHTML="";
-  questions.forEach((q,i)=>{
-    let d=document.createElement("div");
-    d.className="card";
-    d.textContent=`${q.chapter} ★${q.difficulty} ${q.answer}`;
-    let b=document.createElement("button");
-    b.textContent="削除";
-    b.onclick=()=>{ if(confirm("削除?")){questions.splice(i,1); saveAll(); updateList();}};
-    d.appendChild(b); questionList.appendChild(d);
+// 章選択更新
+function updateChapterSelect(){
+  chapterSelect.innerHTML="";
+  [...new Set(questions.map(q=>q.chapter))].forEach(c=>{
+    let o=document.createElement("option"); o.value=o.textContent=c; chapterSelect.appendChild(o);
   });
 }
 
-function saveChapterView(){
-  chapters[chapterViewInput.value]={center:map.getCenter(),zoom:map.getZoom()};
-  saveAll(); alert("保存しました");
+function updateListChapterSelect(){
+  listChapterSelect.innerHTML='<option value="">章を選択</option>';
+  [...new Set(questions.map(q=>q.chapter))].forEach(c=>{
+    let o=document.createElement("option"); o.value=o.textContent=c; listChapterSelect.appendChild(o);
+  });
 }
 
-window.onload=()=>switchMode("play");
+// window.onload
+window.onload = ()=>show("menu");
+
 </script>
 </body>
 </html>
