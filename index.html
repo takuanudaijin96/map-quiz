@@ -124,26 +124,22 @@ select,input { width:100%; margin:6px 0; padding:8px; font-size:16px; border-rad
 
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 <script>
-// 地図初期化
 let map = L.map("map").setView([35,135],4);
 
 // 作問モード：川だけ表示タイル
 let riverTile = L.tileLayer(
   "https://{s}.basemaps.cartocdn.com/light_only_water/{z}/{x}/{y}{r}.png",
-  { 
-    attribution: '&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contributors &copy; CARTO',
-    subdomains: 'abcd',
-    maxZoom: 20
-  }
+  { attribution:'&copy; OSM contributors &copy; CARTO', subdomains:'abcd', maxZoom:20 }
 );
 
 // 解答モード：ラベルなし
 let noLabelTile = L.tileLayer(
-  "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png"
+  "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png",
+  { attribution:'&copy; OSM contributors &copy; CARTO', subdomains:'abcd', maxZoom:20 }
 );
 noLabelTile.addTo(map);
 
-// データ管理
+// データ
 let questions = [];
 let chapters = JSON.parse(localStorage.getItem("chapters")||"{}");
 let progress = JSON.parse(localStorage.getItem("progress")||"{}");
@@ -162,25 +158,16 @@ function show(id){
 // モード切替
 function switchMode(mode){
   if(mode==="create"){
-    map.removeLayer(noLabelTile); riverTile.addTo(map); 
-    updateListChapterSelect(); 
-    show("createMenu");
+    show("createMenu"); // 画面を先に表示
+    map.removeLayer(noLabelTile); riverTile.addTo(map);
+    setTimeout(()=>map.invalidateSize(),100); // 再描画
+    updateListChapterSelect();
   } else {
-    map.removeLayer(riverTile); noLabelTile.addTo(map);
-    updateChapterSelect();
     show("chapterScreen");
+    map.removeLayer(riverTile); noLabelTile.addTo(map);
+    setTimeout(()=>map.invalidateSize(),100);
+    updateChapterSelect();
   }
-}
-
-// JSON出力
-function downloadJSON(){
-  if(questions.length === 0){ alert("まだ問題がありません！"); return; }
-  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(questions,null,2));
-  const dlAnchor = document.createElement('a');
-  dlAnchor.setAttribute("href", dataStr);
-  dlAnchor.setAttribute("download", "questions.json");
-  dlAnchor.click();
-  alert("questions.json をダウンロードしました。友達と共有できます。");
 }
 
 // 作問クリック
@@ -225,9 +212,57 @@ function updateListChapterSelect(){
   });
 }
 
-// window.onload
-window.onload = ()=>show("menu");
+// 問題一覧表示
+function showCreateList(){
+  show("createList");
+  updateListChapterSelect();
+  listChapterSelect.value="";
+  questionList.innerHTML="";
+}
 
+// 問題リスト更新
+function updateList(){
+  const selectedChapter = listChapterSelect.value;
+  questionList.innerHTML="";
+  if(!selectedChapter) return;
+  questions.forEach((q,i)=>{
+    if(q.chapter!==selectedChapter) return;
+    let d=document.createElement("div");
+    d.className="card";
+    d.textContent=`${q.chapter} ★${q.difficulty} ${q.answer}`;
+    let b=document.createElement("button");
+    b.textContent="削除";
+    b.onclick=()=>{ 
+      if(confirm("削除しますか？")){
+        questions.splice(i,1);
+        updateList();
+        updateListChapterSelect();
+      }
+    };
+    d.appendChild(b);
+    questionList.appendChild(d);
+  });
+}
+
+// JSON出力
+function downloadJSON(){
+  if(questions.length===0){ alert("まだ問題がありません！"); return; }
+  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(questions,null,2));
+  const dlAnchor = document.createElement('a');
+  dlAnchor.setAttribute("href",dataStr);
+  dlAnchor.setAttribute("download","questions.json");
+  dlAnchor.click();
+  alert("questions.json をダウンロードしました。友達と共有可能です。");
+}
+
+// 章の地図保存
+function saveChapterView(){
+  chapters[chapterViewInput.value]={center:map.getCenter(),zoom:map.getZoom()};
+  localStorage.setItem("chapters",JSON.stringify(chapters));
+  alert("章の地図設定を保存しました");
+}
+
+window.onload=()=>show("menu");
 </script>
 </body>
 </html>
